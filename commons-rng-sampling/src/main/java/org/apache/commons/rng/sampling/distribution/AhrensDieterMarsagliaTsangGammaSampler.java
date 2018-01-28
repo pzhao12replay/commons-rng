@@ -22,7 +22,7 @@ import org.apache.commons.rng.UniformRandomProvider;
  * Sampling from the <a href="http://mathworld.wolfram.com/GammaDistribution.html">Gamma distribution</a>.
  * <ul>
  *  <li>
- *   For {@code 0 < theta < 1}:
+ *   For {@code 0 < shape < 1}:
  *   <blockquote>
  *    Ahrens, J. H. and Dieter, U.,
  *    <i>Computer methods for sampling from gamma, beta, Poisson and binomial distributions,</i>
@@ -30,7 +30,7 @@ import org.apache.commons.rng.UniformRandomProvider;
  *   </blockquote>
  *  </li>
  *  <li>
- *  For {@code theta >= 1}:
+ *  For {@code shape >= 1}:
  *   <blockquote>
  *   Marsaglia and Tsang, <i>A Simple Method for Generating
  *   Gamma Variables.</i> ACM Transactions on Mathematical Software,
@@ -42,22 +42,12 @@ import org.apache.commons.rng.UniformRandomProvider;
 public class AhrensDieterMarsagliaTsangGammaSampler
     extends SamplerBase
     implements ContinuousSampler {
-    /** 1/3 */
-    private static final double ONE_THIRD = 1d / 3;
     /** The shape parameter. */
     private final double theta;
     /** The alpha parameter. */
     private final double alpha;
-    /** Inverse of "theta". */
-    private final double oneOverTheta;
-    /** Optimization (see code). */
-    private final double bGSOptim;
-    /** Optimization (see code). */
-    private final double dOptim;
-    /** Optimization (see code). */
-    private final double cOptim;
     /** Gaussian sampling. */
-    private final NormalizedGaussianSampler gaussian;
+    private final BoxMullerGaussianSampler gaussian;
 
     /**
      * @param rng Generator of uniformly distributed random numbers.
@@ -70,11 +60,7 @@ public class AhrensDieterMarsagliaTsangGammaSampler
         super(rng);
         this.alpha = alpha;
         this.theta = theta;
-        gaussian = new ZigguratNormalizedGaussianSampler(rng);
-        oneOverTheta = 1 / theta;
-        bGSOptim = 1 + theta / Math.E;
-        dOptim = theta - ONE_THIRD;
-        cOptim = ONE_THIRD / Math.sqrt(dOptim);
+        gaussian = new BoxMullerGaussianSampler(rng, 0, 1);
     }
 
     /** {@inheritDoc} */
@@ -86,12 +72,13 @@ public class AhrensDieterMarsagliaTsangGammaSampler
             while (true) {
                 // Step 1:
                 final double u = nextDouble();
-                final double p = bGSOptim * u;
+                final double bGS = 1 + theta / Math.E;
+                final double p = bGS * u;
 
                 if (p <= 1) {
                     // Step 2:
 
-                    final double x = Math.pow(p, oneOverTheta);
+                    final double x = Math.pow(p, 1 / theta);
                     final double u2 = nextDouble();
 
                     if (u2 > Math.exp(-x)) {
@@ -103,7 +90,7 @@ public class AhrensDieterMarsagliaTsangGammaSampler
                 } else {
                     // Step 3:
 
-                    final double x = -Math.log((bGSOptim - p) * oneOverTheta);
+                    final double x = -1 * Math.log((bGS - p) / theta);
                     final double u2 = nextDouble();
 
                     if (u2 > Math.pow(x, theta - 1)) {
@@ -114,27 +101,31 @@ public class AhrensDieterMarsagliaTsangGammaSampler
                     }
                 }
             }
-        } else {
-            while (true) {
-                final double x = gaussian.sample();
-                final double oPcTx = 1 + cOptim * x;
-                final double v = oPcTx * oPcTx * oPcTx;
+        }
 
-                if (v <= 0) {
-                    continue;
-                }
+        // Now theta >= 1.
 
-                final double x2 = x * x;
-                final double u = nextDouble();
+        final double d = theta - 0.333333333333333333;
+        final double c = 1 / (3 * Math.sqrt(d));
 
-                // Squeeze.
-                if (u < 1 - 0.0331 * x2 * x2) {
-                    return alpha * dOptim * v;
-                }
+        while (true) {
+            final double x = gaussian.sample();
+            final double v = (1 + c * x) * (1 + c * x) * (1 + c * x);
 
-                if (Math.log(u) < 0.5 * x2 + dOptim * (1 - v + Math.log(v))) {
-                    return alpha * dOptim * v;
-                }
+            if (v <= 0) {
+                continue;
+            }
+
+            final double x2 = x * x;
+            final double u = nextDouble();
+
+            // Squeeze.
+            if (u < 1 - 0.0331 * x2 * x2) {
+                return alpha * d * v;
+            }
+
+            if (Math.log(u) < 0.5 * x2 + d * (1 - v + Math.log(v))) {
+                return alpha * d * v;
             }
         }
     }
